@@ -87,6 +87,7 @@ curl -X POST https://api.sspsystems.com/v1/plugins/submit \
     "api_endpoint": "https://your-app.herokuapp.com",
     "supported_features": ["charge", "refund", "payment_intent"],
     "supported_currencies": ["INR"],
+    "supported_events": ["order.created", "order.paid", "payment.succeeded"],
     "developer_name": "Your Name",
     "developer_email": "your@email.com"
   }'
