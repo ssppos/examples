@@ -9,14 +9,26 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-// Authentication middleware
+// Authentication middleware — verifies SSP outbound webhook signature
 const authenticate = (req, res, next) => {
-  const apiKey = req.headers['x-api-key'];
+  const signature = req.headers['x-ssp-signature'];
 
-  if (!apiKey || apiKey !== process.env.SSP_API_KEY) {
+  if (!signature || !process.env.SSP_WEBHOOK_SECRET) {
     return res.status(401).json({
       error: true,
-      message: 'Unauthorized - Invalid or missing API key'
+      message: 'Unauthorized - Missing signature'
+    });
+  }
+
+  const expected = crypto
+    .createHmac('sha256', process.env.SSP_WEBHOOK_SECRET)
+    .update(JSON.stringify(req.body))
+    .digest('hex');
+
+  if (signature !== expected) {
+    return res.status(401).json({
+      error: true,
+      message: 'Unauthorized - Invalid signature'
     });
   }
 
@@ -250,14 +262,22 @@ app.post('/webhooks/razorpay', async (req, res) => {
 
     // Forward to SSP Backend
     if (process.env.SSP_CALLBACK_URL) {
-      await axios.post(process.env.SSP_CALLBACK_URL, {
+      const forwardPayload = {
         provider: 'razorpay-upi',
         event: event.event,
         payload: event.payload,
         transaction_id: event.payload?.payment?.entity?.id,
-      }, {
+      };
+      const forwardBody = JSON.stringify(forwardPayload);
+      const forwardSignature = crypto
+        .createHmac('sha256', process.env.SSP_WEBHOOK_SECRET)
+        .update(forwardBody)
+        .digest('hex');
+
+      await axios.post(process.env.SSP_CALLBACK_URL, forwardPayload, {
         headers: {
-          'X-Webhook-Secret': process.env.SSP_WEBHOOK_SECRET,
+          'X-Plugin-Api-Key': process.env.SSP_PLUGIN_API_KEY,
+          'X-SSP-Signature': forwardSignature,
           'Content-Type': 'application/json',
         },
       });

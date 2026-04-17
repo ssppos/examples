@@ -1,4 +1,5 @@
 const express = require('express');
+const crypto = require('crypto');
 require('dotenv').config();
 
 const app = express();
@@ -6,14 +7,26 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-// Authentication middleware
+// Authentication middleware — verifies SSP outbound webhook HMAC signature
 const authenticate = (req, res, next) => {
-  const apiKey = req.headers['x-api-key'];
+  const signature = req.headers['x-ssp-signature'];
 
-  if (!apiKey || apiKey !== process.env.SSP_API_KEY) {
+  if (!signature || !process.env.SSP_WEBHOOK_SECRET) {
     return res.status(401).json({
       error: true,
-      message: 'Unauthorized'
+      message: 'Unauthorized - Missing signature'
+    });
+  }
+
+  const expected = crypto
+    .createHmac('sha256', process.env.SSP_WEBHOOK_SECRET)
+    .update(JSON.stringify(req.body))
+    .digest('hex');
+
+  if (signature !== expected) {
+    return res.status(401).json({
+      error: true,
+      message: 'Unauthorized - Invalid signature'
     });
   }
 

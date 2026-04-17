@@ -15,7 +15,7 @@ import logging
 app = Flask(__name__)
 
 # Configuration
-SSP_API_KEY = os.getenv('SSP_API_KEY')
+SSP_PLUGIN_API_KEY = os.getenv('SSP_PLUGIN_API_KEY')
 SSP_WEBHOOK_URL = os.getenv('SSP_WEBHOOK_URL', 'https://api.ssppos.com/webhooks/external')
 SSP_WEBHOOK_SECRET = os.getenv('SSP_WEBHOOK_SECRET')
 DOORDASH_API_URL = os.getenv('DOORDASH_API_URL', 'https://openapi.doordash.com')
@@ -25,16 +25,28 @@ DOORDASH_WEBHOOK_SECRET = os.getenv('DOORDASH_WEBHOOK_SECRET')
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Authentication decorator
+# Authentication decorator — verifies SSP outbound webhook HMAC signature
 def require_auth(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        api_key = request.headers.get('X-API-Key')
+        signature = request.headers.get('X-SSP-Signature')
 
-        if not api_key or api_key != SSP_API_KEY:
+        if not signature or not SSP_WEBHOOK_SECRET:
             return jsonify({
                 'error': True,
-                'message': 'Unauthorized - Invalid or missing API key'
+                'message': 'Unauthorized - Missing signature'
+            }), 401
+
+        expected = hmac.new(
+            SSP_WEBHOOK_SECRET.encode(),
+            request.get_data(),
+            hashlib.sha256
+        ).hexdigest()
+
+        if not hmac.compare_digest(signature, expected):
+            return jsonify({
+                'error': True,
+                'message': 'Unauthorized - Invalid signature'
             }), 401
 
         return f(*args, **kwargs)
@@ -376,11 +388,20 @@ def transform_doordash_event(event):
 def forward_to_ssp(webhook_data):
     """Forward webhook to SSP Backend"""
     try:
+        import json
+        body = json.dumps(webhook_data)
+        signature = hmac.new(
+            SSP_WEBHOOK_SECRET.encode(),
+            body.encode(),
+            hashlib.sha256
+        ).hexdigest()
+
         response = requests.post(
             SSP_WEBHOOK_URL,
-            json=webhook_data,
+            data=body,
             headers={
-                'X-Webhook-Secret': SSP_WEBHOOK_SECRET,
+                'X-Plugin-Api-Key': SSP_PLUGIN_API_KEY,
+                'X-SSP-Signature': signature,
                 'Content-Type': 'application/json'
             },
             timeout=5

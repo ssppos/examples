@@ -67,13 +67,13 @@ Implement based on your plugin type:
 
 ## Authentication
 
-All requests from SSP include:
+SSP signs all outbound requests with HMAC SHA-256. Your plugin receives:
 
 ```
-X-API-Key: your-plugin-api-key
+X-SSP-Signature: <hmac-sha256-hex>
 ```
 
-Always validate this header!
+Always verify this signature using your `SSP_WEBHOOK_SECRET`!
 
 ## Response Format
 

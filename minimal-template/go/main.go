@@ -1,6 +1,11 @@
 package main
 
 import (
+	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -10,17 +15,42 @@ import (
 	"github.com/joho/godotenv"
 )
 
-// Authentication middleware
+// Authentication middleware — verifies SSP outbound webhook HMAC signature
 func authMiddleware() gin.HandlerFunc {
-	sspAPIKey := os.Getenv("SSP_API_KEY")
+	webhookSecret := os.Getenv("SSP_WEBHOOK_SECRET")
 
 	return func(c *gin.Context) {
-		apiKey := c.GetHeader("X-API-Key")
+		signature := c.GetHeader("X-SSP-Signature")
 
-		if apiKey == "" || apiKey != sspAPIKey {
+		if signature == "" || webhookSecret == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"error":   true,
-				"message": "Unauthorized - Invalid or missing API key",
+				"message": "Unauthorized - Missing signature",
+			})
+			c.Abort()
+			return
+		}
+
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":   true,
+				"message": "Unable to read request body",
+			})
+			c.Abort()
+			return
+		}
+		// Replace the body so downstream handlers can read it
+		c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
+
+		mac := hmac.New(sha256.New, []byte(webhookSecret))
+		mac.Write(body)
+		expected := hex.EncodeToString(mac.Sum(nil))
+
+		if !hmac.Equal([]byte(signature), []byte(expected)) {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error":   true,
+				"message": "Unauthorized - Invalid signature",
 			})
 			c.Abort()
 			return
@@ -95,8 +125,8 @@ func main() {
 	}
 
 	// Validate required environment variables
-	if os.Getenv("SSP_API_KEY") == "" {
-		log.Fatal("SSP_API_KEY environment variable is required")
+	if os.Getenv("SSP_WEBHOOK_SECRET") == "" {
+		log.Fatal("SSP_WEBHOOK_SECRET environment variable is required")
 	}
 
 	// Set Gin mode

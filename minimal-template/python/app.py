@@ -2,6 +2,8 @@ from flask import Flask, request, jsonify
 from functools import wraps
 from datetime import datetime
 import os
+import hmac
+import hashlib
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -9,19 +11,31 @@ load_dotenv()
 app = Flask(__name__)
 
 # Configuration
-SSP_API_KEY = os.getenv('SSP_API_KEY')
+SSP_WEBHOOK_SECRET = os.getenv('SSP_WEBHOOK_SECRET')
 PORT = int(os.getenv('PORT', 3000))
 
-# Authentication decorator
+# Authentication decorator — verifies SSP outbound webhook HMAC signature
 def require_auth(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        api_key = request.headers.get('X-API-Key')
+        signature = request.headers.get('X-SSP-Signature')
 
-        if not api_key or api_key != SSP_API_KEY:
+        if not signature or not SSP_WEBHOOK_SECRET:
             return jsonify({
                 'error': True,
-                'message': 'Unauthorized'
+                'message': 'Unauthorized - Missing signature'
+            }), 401
+
+        expected = hmac.new(
+            SSP_WEBHOOK_SECRET.encode(),
+            request.get_data(),
+            hashlib.sha256
+        ).hexdigest()
+
+        if not hmac.compare_digest(signature, expected):
+            return jsonify({
+                'error': True,
+                'message': 'Unauthorized - Invalid signature'
             }), 401
 
         return f(*args, **kwargs)

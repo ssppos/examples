@@ -36,9 +36,9 @@ Server starts at `http://localhost:3000`
 # Health check
 curl http://localhost:3000/health
 
-# Test with authentication
+# Test with authentication (X-SSP-Signature = HMAC-SHA256 of body using your webhook secret)
 curl -X POST http://localhost:3000/your-endpoint \
-  -H "X-API-Key: your-ssp-api-key" \
+  -H "X-SSP-Signature: <hmac-hex>" \
   -H "Content-Type: application/json" \
   -d '{"test": "data"}'
 ```
@@ -58,7 +58,7 @@ echo "web: vendor/bin/heroku-php-apache2" > Procfile
 
 heroku create your-plugin-name
 git push heroku main
-heroku config:set SSP_API_KEY=your-key
+heroku config:set SSP_WEBHOOK_SECRET=your-secret
 ```
 
 ### Traditional Hosting

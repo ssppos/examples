@@ -35,7 +35,7 @@ Edit `.env`:
 
 ```env
 # SSP Configuration
-SSP_API_KEY=your-ssp-api-key-here
+SSP_PLUGIN_API_KEY=pik_your-plugin-api-key-here
 SSP_WEBHOOK_SECRET=your-webhook-secret
 
 # DoorDash Configuration
@@ -59,7 +59,7 @@ curl http://localhost:3000/health
 
 # Create delivery order
 curl -X POST http://localhost:3000/orders \
-  -H "X-API-Key: your-ssp-api-key" \
+  -H "X-SSP-Signature: <hmac-hex>" \
   -H "Content-Type: application/json" \
   -d '{
     "order_id": "order_123",
@@ -145,7 +145,7 @@ https://your-app.com/webhooks/doordash
 heroku create doordash-ssp-plugin
 echo "web: gunicorn app:app" > Procfile
 git push heroku main
-heroku config:set SSP_API_KEY=your-key
+heroku config:set SSP_PLUGIN_API_KEY=pik_your-key SSP_WEBHOOK_SECRET=your-secret
 ```
 
 ### Railway
@@ -153,7 +153,7 @@ heroku config:set SSP_API_KEY=your-key
 ```bash
 railway init
 railway up
-railway variables set SSP_API_KEY=your-key
+railway variables set SSP_PLUGIN_API_KEY=pik_your-key SSP_WEBHOOK_SECRET=your-secret
 ```
 
 ### Docker
@@ -179,7 +179,7 @@ CMD ["gunicorn", "app:app", "--bind", "0.0.0.0:3000"]
 
 ```bash
 curl -X POST https://api.ssppos.com/v1/plugins/submit \
-  -H "Authorization: Bearer YOUR_SSP_TOKEN" \
+  -H "X-Plugin-Api-Key: pik_YOUR_KEY" \
   -d '{
     "name": "doordash-delivery",
     "display_name": "DoorDash Delivery",

@@ -76,7 +76,7 @@ Deploy to your preferred platform:
 
 ```bash
 curl -X POST https://api.sspsystems.com/v1/plugins/submit \
-  -H "Authorization: Bearer YOUR_SSP_TOKEN" \
+  -H "X-Plugin-Api-Key: pik_YOUR_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "razorpay-upi",
@@ -128,21 +128,25 @@ All plugins must implement these endpoints:
 
 ### Authentication
 
-Your plugin receives authentication via headers:
+SSP signs all outbound requests with HMAC SHA-256. Your plugin receives:
 
-```javascript
-// SSP Backend sends
-headers: {
-  'X-API-Key': 'your-plugin-api-key',
-  'Content-Type': 'application/json'
-}
+```
+X-SSP-Signature: <hmac-sha256-hex>
+Content-Type: application/json
 ```
 
-Validate this on every request:
+Verify the signature on every request:
 
 ```javascript
-if (req.headers['x-api-key'] !== process.env.SSP_API_KEY) {
-  return res.status(401).json({ error: 'Unauthorized' });
+const crypto = require('crypto');
+
+const expected = crypto
+  .createHmac('sha256', process.env.SSP_WEBHOOK_SECRET)
+  .update(JSON.stringify(req.body))
+  .digest('hex');
+
+if (req.headers['x-ssp-signature'] !== expected) {
+  return res.status(401).json({ error: 'Invalid signature' });
 }
 ```
 
@@ -203,20 +207,30 @@ Return errors in consistent format:
 Forward webhooks from your payment provider to SSP:
 
 ```javascript
+const crypto = require('crypto');
+
 // Receive from Razorpay
 app.post('/webhooks/razorpay', async (req, res) => {
-  // Verify signature
+  // Verify Razorpay signature
   const isValid = verifySignature(req);
   if (!isValid) return res.status(401).send();
 
-  // Forward to SSP
-  await axios.post('https://api.sspsystems.com/webhooks/external', {
+  // Forward to SSP with plugin API key + HMAC signature
+  const payload = {
     provider: 'razorpay-upi',
     event: req.body.event,
     payload: req.body.payload
-  }, {
+  };
+  const body = JSON.stringify(payload);
+  const signature = crypto
+    .createHmac('sha256', process.env.SSP_WEBHOOK_SECRET)
+    .update(body)
+    .digest('hex');
+
+  await axios.post('https://api.sspsystems.com/webhooks/external', payload, {
     headers: {
-      'X-Webhook-Secret': process.env.SSP_WEBHOOK_SECRET
+      'X-Plugin-Api-Key': process.env.SSP_PLUGIN_API_KEY,
+      'X-SSP-Signature': signature
     }
   });
 
@@ -276,7 +290,7 @@ curl http://localhost:3000/health
 
 # Test charge endpoint
 curl -X POST http://localhost:3000/charge \
-  -H "X-API-Key: test-key" \
+  -H "X-SSP-Signature: <hmac-hex>" \
   -H "Content-Type: application/json" \
   -d '{
     "amount": 100,
@@ -302,7 +316,7 @@ Use the SSP test environment:
 ```bash
 heroku create your-plugin-name
 git push heroku main
-heroku config:set SSP_API_KEY=your-key
+heroku config:set SSP_WEBHOOK_SECRET=your-secret SSP_PLUGIN_API_KEY=pik_your-key
 ```
 
 ### Railway
@@ -310,7 +324,7 @@ heroku config:set SSP_API_KEY=your-key
 ```bash
 railway init
 railway up
-railway variables set SSP_API_KEY=your-key
+railway variables set SSP_WEBHOOK_SECRET=your-secret SSP_PLUGIN_API_KEY=pik_your-key
 ```
 
 ### DigitalOcean

@@ -15,16 +15,30 @@ $app = AppFactory::create();
 $app->addBodyParsingMiddleware();
 $app->addErrorMiddleware(true, true, true);
 
-// Authentication middleware
+// Authentication middleware — verifies SSP outbound webhook HMAC signature
 $authMiddleware = function (Request $request, $handler) {
-    $apiKey = $request->getHeaderLine('X-API-Key');
-    $expectedKey = $_ENV['SSP_API_KEY'] ?? '';
+    $signature = $request->getHeaderLine('X-SSP-Signature');
+    $webhookSecret = $_ENV['SSP_WEBHOOK_SECRET'] ?? '';
 
-    if (empty($apiKey) || $apiKey !== $expectedKey) {
+    if (empty($signature) || empty($webhookSecret)) {
         $response = new \Slim\Psr7\Response();
         $response->getBody()->write(json_encode([
             'error' => true,
-            'message' => 'Unauthorized'
+            'message' => 'Unauthorized - Missing signature'
+        ]));
+        return $response
+            ->withHeader('Content-Type', 'application/json')
+            ->withStatus(401);
+    }
+
+    $body = (string) $request->getBody();
+    $expected = hash_hmac('sha256', $body, $webhookSecret);
+
+    if (!hash_equals($expected, $signature)) {
+        $response = new \Slim\Psr7\Response();
+        $response->getBody()->write(json_encode([
+            'error' => true,
+            'message' => 'Unauthorized - Invalid signature'
         ]));
         return $response
             ->withHeader('Content-Type', 'application/json')

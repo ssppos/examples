@@ -37,7 +37,7 @@ Edit `.env`:
 
 ```env
 # SSP Configuration
-SSP_API_KEY=your-ssp-api-key-here
+SSP_PLUGIN_API_KEY=pik_your-plugin-api-key-here
 SSP_WEBHOOK_SECRET=your-webhook-secret-here
 SSP_CALLBACK_URL=https://api.sspsystems.com/webhooks/external
 
@@ -70,7 +70,7 @@ curl http://localhost:3000/capabilities
 
 # Test charge (sandbox)
 curl -X POST http://localhost:3000/charge \
-  -H "X-API-Key: your-ssp-api-key" \
+  -H "X-SSP-Signature: <hmac-hex>" \
   -H "Content-Type: application/json" \
   -d '{
     "amount": 100,
@@ -93,7 +93,7 @@ curl -X POST http://localhost:3000/charge \
 ```bash
 heroku create razorpay-ssp-bridge
 git push heroku main
-heroku config:set SSP_API_KEY=your-key
+heroku config:set SSP_PLUGIN_API_KEY=pik_your-key
 heroku config:set SSP_WEBHOOK_SECRET=your-secret
 ```
 
@@ -116,7 +116,7 @@ After deployment:
 
 ```bash
 curl -X POST https://api.sspsystems.com/v1/plugins/submit \
-  -H "Authorization: Bearer YOUR_SSP_TOKEN" \
+  -H "X-Plugin-Api-Key: pik_YOUR_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "razorpay-upi",
