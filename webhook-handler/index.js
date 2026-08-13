@@ -108,7 +108,8 @@ async function process_(event, data, installationId, timestamp) {
   // Deliveries can repeat, so make handling idempotent. A natural key from the
   // payload works well; persist the marker in your database, not in memory.
   //
-  //   const key = `${event}:${installationId}:${data.order_id ?? data.transaction_id}`;
+  //   const id = data.transaction_id ?? data.payment_id ?? data.order_id;
+  //   const key = `${event}:${installationId}:${id}`;
   //   if (!await db.processedEvents.insertIfAbsent({ key })) return;
 
   switch (event) {
@@ -235,17 +236,33 @@ async function handleOrderCancelled(data) {
 // Payment events
 // =============================================================================
 
+/**
+ * NOTE: payment.succeeded arrives in TWO different shapes.
+ *
+ *   observer path  - transaction_id, tip_amount, tax_amount, discount_amount,
+ *                    stripe_payment_intent_id, transaction_type, processed_at
+ *   capture path   - payment_id, provider, remaining_balance, and none of the above
+ *                    (emitted by POST /orders/{id}/payments)
+ *
+ * A capture your own plugin records also trips the observer, so ONE capture
+ * delivers BOTH. Read defensively and deduplicate on the id.
+ */
 async function handlePaymentSucceeded(data) {
+  const transactionId = data.transaction_id ?? data.payment_id;
+
   console.log('Payment succeeded:', {
-    transactionId: data.transaction_id,
+    transactionId,
     orderId: data.order_id,
     amount: data.amount,
     currency: data.currency,
     method: data.payment_method,
+    // Present on the observer path only.
     tip: data.tip_amount,
     tax: data.tax_amount,
-    // null for non-Stripe payments, including captures your own plugin records
     stripePaymentIntentId: data.stripe_payment_intent_id,
+    // Present on the capture path only.
+    provider: data.provider,
+    remainingBalance: data.remaining_balance,
   });
 }
 
