@@ -243,9 +243,7 @@ Any additional information reviewers should know.
 
 ## Questions?
 
-- **Discord**: https://discord.gg/sspsystems
-- **Email**: developers@sspsystems.com
-- **Forum**: https://forum.sspsystems.com
+- **Email**: developers@ssppos.com
 
 ## Code of Conduct
 

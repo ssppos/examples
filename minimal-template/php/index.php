@@ -31,6 +31,8 @@ $authMiddleware = function (Request $request, $handler) {
             ->withStatus(401);
     }
 
+    // The RAW body. Never hash a re-encoded copy (json_encode of the parsed
+    // array) - the signature covers the exact bytes SSP transmitted.
     $body = (string) $request->getBody();
     $expected = hash_hmac('sha256', $body, $webhookSecret);
 
@@ -48,7 +50,10 @@ $authMiddleware = function (Request $request, $handler) {
     return $handler->handle($request);
 };
 
-// Health check - REQUIRED
+// Health check - the ONE endpoint SSP requires you to expose.
+// SSP polls GET {api_endpoint}/health with a 5-second timeout; a response
+// slower than 3 seconds is recorded as "degraded" on your marketplace listing,
+// so keep this free of database and upstream calls.
 $app->get('/health', function (Request $request, Response $response) {
     $data = [
         'status' => 'ok',
@@ -60,53 +65,54 @@ $app->get('/health', function (Request $request, Response $response) {
     return $response->withHeader('Content-Type', 'application/json');
 });
 
-// Capabilities - REQUIRED
-$app->get('/capabilities', function (Request $request, Response $response) {
-    $data = [
-        'supported_methods' => ['your_methods_here'],
-        'supported_currencies' => ['USD', 'INR'],
-        'features' => ['feature1', 'feature2']
-    ];
+// SSP webhook receiver.
+// Subscribe to events via `supported_events` on your plugin listing.
+$app->post('/webhooks/ssp', function (Request $request, Response $response) {
+    $envelope = json_decode((string) $request->getBody(), true);
 
-    $response->getBody()->write(json_encode($data));
+    $event = $envelope['event'] ?? null;
+    $installationId = $envelope['installation_id'] ?? null;
+    $data = $envelope['data'] ?? [];
+
+    // `installation_id` is your tenant key - look up that installation's pik_
+    // key and act in its context.
+    error_log("[{$installationId}] {$event}");
+
+    // TODO: enqueue the work rather than doing it here. SSP allows 10 seconds
+    // and retries 3 times (60s / 300s / 900s) on any non-2xx, so slow
+    // processing on the request path turns into duplicate deliveries.
+    // Make handling idempotent: duplicates are normal, not exceptional.
+
+    $response->getBody()->write(json_encode(['status' => 'ok']));
     return $response->withHeader('Content-Type', 'application/json');
-});
+})->add($authMiddleware);
 
-// Example endpoint - Implement your business logic here
+// Your own endpoints. SSP never calls these - design them as you like.
+// Everything beyond /health and the webhook route is YOUR plugin calling SSP:
+//
+//   $client->get('https://api.ssppos.com/api/plugin/v1/orders', [
+//       'headers' => ['X-Plugin-Api-Key' => $installationApiKey],
+//   ]);
+//
+// See https://docs.ssppos.com/docs/sdk/plugin-data-api
 $app->post('/your-endpoint', function (Request $request, Response $response) {
     try {
-        $data = $request->getParsedBody();
-
         // TODO: Implement your logic here
-        // 1. Validate input
-        // 2. Process request
-        // 3. Return response
-
-        $result = [
-            'success' => true,
-            'message' => 'Request processed successfully',
-            'data' => [
-                // Your response data
-            ]
-        ];
-
-        $response->getBody()->write(json_encode($result));
+        $response->getBody()->write(json_encode(['success' => true]));
         return $response->withHeader('Content-Type', 'application/json');
 
     } catch (Exception $e) {
         error_log('Error: ' . $e->getMessage());
 
-        $error = [
+        $response->getBody()->write(json_encode([
             'error' => true,
             'message' => $e->getMessage()
-        ];
-
-        $response->getBody()->write(json_encode($error));
+        ]));
         return $response
             ->withHeader('Content-Type', 'application/json')
             ->withStatus(500);
     }
-})->add($authMiddleware);
+});
 
 // 404 handler
 $app->map(['GET', 'POST', 'PUT', 'DELETE', 'PATCH'], '/{routes:.+}', function ($request, $response) {

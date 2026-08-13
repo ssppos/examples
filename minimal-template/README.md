@@ -17,12 +17,15 @@ A bare-bones template for creating SSP POS plugins. Choose your language and get
 4. Implement your business logic
 5. Deploy and register with SSP
 
-## Required Endpoints
+## What SSP actually calls on your service
 
-All plugins must implement:
+For a marketplace plugin, SSP makes exactly **two** kinds of request to you:
 
-### GET /health
-Health check endpoint.
+### GET /health — required
+
+Polled periodically with a **5-second timeout**. A response slower than
+3 seconds is recorded as `degraded` and shown on your marketplace listing, so
+keep it free of database and upstream calls.
 
 ```json
 {
@@ -31,39 +34,37 @@ Health check endpoint.
 }
 ```
 
-### GET /capabilities
-Returns what your plugin supports.
+### POST {your webhook route} — required if you subscribe to events
 
-```json
-{
-  "supported_methods": ["your", "methods"],
-  "supported_currencies": ["USD", "INR"],
-  "features": ["charge", "refund"]
-}
-```
+Signed event delivery. Verify `X-SSP-Signature` over the **raw** request body,
+answer 2xx within **10 seconds**, and process asynchronously. SSP retries 3
+times (60s / 300s / 900s backoff) on any non-2xx.
 
-### Plugin-Specific Endpoints
+Optionally, a **setup page** if your plugin needs its own configuration UI —
+see [Setup Handoff](https://docs.ssppos.com/docs/sdk/setup-handoff).
 
-Implement based on your plugin type:
+**That is the entire inbound surface.** Everything else is *your plugin calling
+SSP*, authenticated with the installation's `pik_` key against
+`https://api.ssppos.com/api/plugin/v1`.
 
-**Payment Gateway:**
-- `POST /charge`
-- `POST /refund`
-- `GET /transactions/:id`
-- `POST /payment-intent`
+## Your own API is your own design
 
-**Delivery Platform:**
-- `POST /orders`
-- `PUT /orders/:id`
-- `POST /menu/sync`
+Apart from `/health` and a webhook receiver, SSP never calls your service, so
+you can shape the rest however your product needs.
 
-**Inventory:**
-- `GET /inventory`
-- `POST /inventory/update`
+Where a plugin type has real work to do, it does it by calling SSP:
 
-**Accounting:**
-- `POST /invoices/sync`
-- `POST /expenses/sync`
+| Plugin type | What it calls |
+|-------------|---------------|
+| **Payment** | `POST /orders/{id}/payments` to record a capture authoritatively (needs `payments:capture`) |
+| **Delivery** | `POST /orders` to originate an order (needs `orders:create`), `PUT /orders/{id}` to advance it, `PATCH /menu/{id}` and `POST /menu/bulk-availability` to sync availability |
+| **Inventory** | `GET /inventory`, `POST /inventory/{id}/movements` to write the stock ledger |
+
+> One exception: the **external gateway provider** registration is a separate
+> contract in which SSP *does* call your `POST /charge`, `POST /refund`,
+> `GET /transactions/{id}` and `POST /payment-intent`. That is not created by
+> publishing a marketplace plugin — see
+> [Payment Gateways](https://docs.ssppos.com/docs/sdk/payment-gateways).
 
 ## Authentication
 
@@ -108,4 +109,4 @@ Return consistent JSON responses:
 ## Support
 
 - Documentation: https://docs.ssppos.com/sdk
-- Email: developers@sspsystems.com
+- Email: developers@ssppos.com

@@ -26,6 +26,9 @@ def require_auth(f):
                 'message': 'Unauthorized - Missing signature'
             }), 401
 
+        # request.get_data() gives the RAW bytes. Never hash a re-serialized
+        # copy (json.dumps(request.json)) - the signature covers the exact
+        # bytes SSP transmitted.
         expected = hmac.new(
             SSP_WEBHOOK_SECRET.encode(),
             request.get_data(),
@@ -41,7 +44,10 @@ def require_auth(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# Health check - REQUIRED
+# Health check - the ONE endpoint SSP requires you to expose.
+# SSP polls GET {api_endpoint}/health with a 5-second timeout; a response
+# slower than 3 seconds is recorded as "degraded" on your marketplace listing,
+# so keep this free of database and upstream calls.
 @app.route('/health', methods=['GET'])
 def health():
     return jsonify({
@@ -50,34 +56,42 @@ def health():
         'timestamp': datetime.utcnow().isoformat() + 'Z'
     })
 
-# Capabilities - REQUIRED
-@app.route('/capabilities', methods=['GET'])
-def capabilities():
-    return jsonify({
-        'supported_methods': ['your_methods_here'],
-        'supported_currencies': ['USD', 'INR'],
-        'features': ['feature1', 'feature2']
-    })
-
-# Example endpoint - Implement your business logic here
-@app.route('/your-endpoint', methods=['POST'])
+# SSP webhook receiver.
+# Subscribe to events via `supported_events` on your plugin listing.
+@app.route('/webhooks/ssp', methods=['POST'])
 @require_auth
+def ssp_webhook():
+    envelope = request.get_json()
+    event = envelope.get('event')
+    installation_id = envelope.get('installation_id')
+    data = envelope.get('data', {})
+
+    # `installation_id` is your tenant key - look up that installation's pik_
+    # key and act in its context.
+    app.logger.info(f'[{installation_id}] {event}')
+
+    # TODO: enqueue the work rather than doing it here. SSP allows 10 seconds
+    # and retries 3 times (60s / 300s / 900s) on any non-2xx, so slow
+    # processing on the request path turns into duplicate deliveries.
+    # Make handling idempotent: duplicates are normal, not exceptional.
+
+    return jsonify({'status': 'ok'})
+
+
+# Your own endpoints. SSP never calls these - design them as you like.
+# Everything beyond /health and the webhook route is YOUR plugin calling SSP:
+#
+#   requests.get(
+#       'https://api.ssppos.com/api/plugin/v1/orders',
+#       headers={'X-Plugin-Api-Key': installation_api_key},
+#   )
+#
+# See https://docs.ssppos.com/docs/sdk/plugin-data-api
+@app.route('/your-endpoint', methods=['POST'])
 def your_endpoint():
     try:
-        data = request.get_json()
-
         # TODO: Implement your logic here
-        # 1. Validate input
-        # 2. Process request
-        # 3. Return response
-
-        return jsonify({
-            'success': True,
-            'message': 'Request processed successfully',
-            'data': {
-                # Your response data
-            }
-        })
+        return jsonify({'success': True})
 
     except Exception as e:
         app.logger.error(f'Error: {str(e)}')
