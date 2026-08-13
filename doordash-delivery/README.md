@@ -178,7 +178,12 @@ CMD ["gunicorn", "app:app", "--bind", "0.0.0.0:3000"]
 ## Register with SSP
 
 ```bash
-curl -X POST https://api.ssppos.com/v1/plugins/submit \
+> **Registration happens in the Developer Portal.** Create a project, provision
+> a sandbox, then promote it with **Create Plugin** at
+> <https://developer.ssppos.com>. The REST call below exists for CI and needs a
+> staff session; it is not the normal path.
+
+curl -X POST https://api.ssppos.com/api/v1/plugins/submit \
   -H "X-Plugin-Api-Key: pik_YOUR_KEY" \
   -d '{
     "name": "doordash-delivery",
@@ -188,7 +193,7 @@ curl -X POST https://api.ssppos.com/v1/plugins/submit \
     "integration_type": "rest_api",
     "api_endpoint": "https://your-app.herokuapp.com",
     "webhook_endpoint": "https://your-app.herokuapp.com/webhooks/ssp",
-    "supported_features": ["order_creation", "status_updates", "tracking"],
+    "supported_features": ["orders:create"],
     "supported_regions": ["US", "CA"],
     "developer_name": "Your Name",
     "developer_email": "your@email.com"

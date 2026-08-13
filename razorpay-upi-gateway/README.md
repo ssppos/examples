@@ -39,7 +39,7 @@ Edit `.env`:
 # SSP Configuration
 SSP_PLUGIN_API_KEY=pik_your-plugin-api-key-here
 SSP_WEBHOOK_SECRET=your-webhook-secret-here
-SSP_CALLBACK_URL=https://api.sspsystems.com/webhooks/external
+SSP_CALLBACK_URL=https://api.ssppos.com/api/plugin/v1/webhooks/external
 
 # Razorpay Configuration (for testing)
 DEFAULT_RAZORPAY_KEY_ID=rzp_test_xxx
@@ -115,7 +115,12 @@ doctl apps create --spec .do/app.yaml
 After deployment:
 
 ```bash
-curl -X POST https://api.sspsystems.com/v1/plugins/submit \
+> **Registration happens in the Developer Portal.** Create a project, provision
+> a sandbox, then promote it with **Create Plugin** at
+> <https://developer.ssppos.com>. The REST call below exists for CI and needs a
+> staff session; it is not the normal path.
+
+curl -X POST https://api.ssppos.com/api/v1/plugins/submit \
   -H "X-Plugin-Api-Key: pik_YOUR_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -126,7 +131,7 @@ curl -X POST https://api.sspsystems.com/v1/plugins/submit \
     "integration_type": "rest_api",
     "api_endpoint": "https://your-app.herokuapp.com",
     "webhook_endpoint": "https://your-app.herokuapp.com/webhooks/ssp",
-    "supported_features": ["charge", "refund", "payment_intent", "cards", "upi", "wallets"],
+    "supported_features": ["payments:capture"],
     "supported_regions": ["IN"],
     "supported_currencies": ["INR"],
     "auth_type": "api_key",
@@ -250,7 +255,7 @@ Create payment intent for async payments.
   "customer": {
     "email": "customer@example.com"
   },
-  "callback_url": "https://api.sspsystems.com/payment/callback/razorpay-upi",
+  "callback_url": "https://api.ssppos.com/api/v1/payment/callback/razorpay-upi",
   "provider_config": {
     "razorpay_key_id": "rzp_live_xxx",
     "razorpay_key_secret": "xxx"

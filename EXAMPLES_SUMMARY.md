@@ -216,7 +216,7 @@ Developers can:
 
 5. **Register with SSP**
    ```bash
-   curl -X POST https://api.sspsystems.com/v1/plugins/submit ...
+   curl -X POST https://api.ssppos.com/api/v1/plugins/submit ...
    ```
 
 ### 🎓 Educational Value

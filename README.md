@@ -75,7 +75,12 @@ Deploy to your preferred platform:
 ### 7. Register with SSP
 
 ```bash
-curl -X POST https://api.sspsystems.com/v1/plugins/submit \
+> **Registration happens in the Developer Portal.** Create a project, provision
+> a sandbox, then promote it with **Create Plugin** at
+> <https://developer.ssppos.com>. The REST call below exists for CI and needs a
+> staff session; it is not the normal path.
+
+curl -X POST https://api.ssppos.com/api/v1/plugins/submit \
   -H "X-Plugin-Api-Key: pik_YOUR_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -85,7 +90,7 @@ curl -X POST https://api.sspsystems.com/v1/plugins/submit \
     "plugin_type": "payment",
     "integration_type": "rest_api",
     "api_endpoint": "https://your-app.herokuapp.com",
-    "supported_features": ["charge", "refund", "payment_intent"],
+    "supported_features": ["payments:capture"],
     "supported_currencies": ["INR"],
     "supported_events": ["order.created", "order.paid", "payment.succeeded"],
     "developer_name": "Your Name",
@@ -95,36 +100,31 @@ curl -X POST https://api.sspsystems.com/v1/plugins/submit \
 
 ## 📖 Documentation
 
-### Plugin Requirements
+### What SSP calls on your plugin
 
-All plugins must implement these endpoints:
+For a marketplace plugin, SSP makes exactly **two** kinds of request to you:
 
-#### Core Endpoints (All Types)
-- `GET /health` - Health check
-- `GET /capabilities` - Supported features
+| Endpoint | Method | Notes |
+|----------|--------|-------|
+| `{api_endpoint}/health` | GET | Polled periodically, 5s timeout, no auth sent. Slower than 3s is recorded as `degraded` |
+| `{webhook_endpoint}` | POST | Signed events. Verify `X-SSP-Signature` over the raw body; answer 2xx within 10s |
 
-#### Payment Gateway Specific
-- `POST /charge` - Process payment
-- `POST /refund` - Refund transaction
-- `GET /transactions/:id` - Get transaction details
-- `POST /payment-intent` - Create payment intent (async payments)
+Optionally a **setup page** (`setup_url`) if your plugin hosts its own
+configuration UI.
 
-#### Delivery Platform Specific
-- `POST /orders` - Create order
-- `PUT /orders/:id` - Update order status
-- `POST /menu/sync` - Sync menu items
-- `POST /webhooks` - Receive webhooks
+**Everything else is your plugin calling SSP**, authenticated with the
+installation's `pik_` key against `https://api.ssppos.com/api/plugin/v1`:
 
-#### Inventory Management Specific
-- `GET /inventory` - Get current inventory
-- `POST /inventory/update` - Update stock levels
-- `POST /inventory/usage` - Track item usage
-- `GET /inventory/alerts` - Get reorder alerts
+| Plugin type | Calls it makes | Capability needed |
+|-------------|----------------|-------------------|
+| **Payment** | `POST /orders/{id}/payments` — records an authoritative sale transaction | `payments:capture` |
+| **Delivery** | `POST /orders`, `PUT /orders/{id}`, `PATCH /menu/{id}`, `POST /menu/bulk-availability` | `orders:create` |
+| **Inventory** | `GET /inventory`, `POST /inventory/{id}/movements`, `PATCH /inventory/{id}` | — |
 
-#### Accounting Specific
-- `POST /invoices/sync` - Sync invoice
-- `POST /expenses/sync` - Sync expense
-- `GET /accounts` - Get chart of accounts
+> The `POST /charge` / `POST /refund` / `POST /payment-intent` contract belongs
+> to the separate **external gateway provider** registration, in which SSP calls
+> your service to move money. Publishing a marketplace plugin does not create
+> one. See [Payment Gateways](https://docs.ssppos.com/docs/sdk/payment-gateways).
 
 ### Authentication
 
@@ -140,12 +140,20 @@ Verify the signature on every request:
 ```javascript
 const crypto = require('crypto');
 
+// express.raw() on the webhook route, so req.body is the RAW Buffer.
+// The HMAC covers the exact bytes SSP transmitted — hashing
+// JSON.stringify(req.body) re-serializes and will not match whenever the
+// payload contains a URL or a non-ASCII character.
 const expected = crypto
   .createHmac('sha256', process.env.SSP_WEBHOOK_SECRET)
-  .update(JSON.stringify(req.body))
+  .update(req.body)
   .digest('hex');
 
-if (req.headers['x-ssp-signature'] !== expected) {
+const received = Buffer.from(req.headers['x-ssp-signature'] || '', 'utf8');
+const computed = Buffer.from(expected, 'utf8');
+
+// Constant-time compare; timingSafeEqual throws on a length mismatch.
+if (received.length !== computed.length || !crypto.timingSafeEqual(received, computed)) {
   return res.status(401).json({ error: 'Invalid signature' });
 }
 ```
@@ -227,7 +235,7 @@ app.post('/webhooks/razorpay', async (req, res) => {
     .update(body)
     .digest('hex');
 
-  await axios.post('https://api.sspsystems.com/webhooks/external', payload, {
+  await axios.post('https://api.ssppos.com/api/plugin/v1/webhooks/external', payload, {
     headers: {
       'X-Plugin-Api-Key': process.env.SSP_PLUGIN_API_KEY,
       'X-SSP-Signature': signature
@@ -261,7 +269,7 @@ const rateLimit = require('express-rate-limit');
 
 const limiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute
-  max: 100 // 100 requests per minute
+  max: 60 // SSP allows 60 req/min per installation on the Plugin Data API
 });
 
 app.use(limiter);
@@ -375,12 +383,10 @@ SSP can handle billing for you:
 
 ### Developer Resources
 - **Documentation**: https://docs.ssppos.com/sdk
-- **API Reference**: https://api-docs.ssppos.com
-- **Forum**: https://forum.ssppos.com
+- **API Reference**: https://docs.ssppos.com/docs/sdk/api-reference
 
 ### Getting Help
-- **Email**: developers@sspsystems.com
-- **Discord**: https://discord.gg/sspsystems
+- **Email**: developers@ssppos.com
 - **GitHub Issues**: https://github.com/sspsystems/examples/issues
 
 ### Commercial Support

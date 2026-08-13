@@ -31,6 +31,8 @@ func authMiddleware() gin.HandlerFunc {
 			return
 		}
 
+		// The RAW bytes. Never hash a re-marshalled copy - the signature
+		// covers the exact bytes SSP transmitted.
 		body, err := io.ReadAll(c.Request.Body)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
@@ -60,7 +62,10 @@ func authMiddleware() gin.HandlerFunc {
 	}
 }
 
-// Health check endpoint
+// Health check - the ONE endpoint SSP requires you to expose.
+// SSP polls GET {api_endpoint}/health with a 5-second timeout; a response
+// slower than 3 seconds is recorded as "degraded" on your marketplace listing,
+// so keep this free of database and upstream calls.
 func healthHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status":    "ok",
@@ -69,20 +74,17 @@ func healthHandler(c *gin.Context) {
 	})
 }
 
-// Capabilities endpoint
-func capabilitiesHandler(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"supported_methods":    []string{"your_methods_here"},
-		"supported_currencies": []string{"USD", "INR"},
-		"features":             []string{"feature1", "feature2"},
-	})
-}
+// SSP webhook receiver.
+// Subscribe to events via `supported_events` on your plugin listing.
+func webhookHandler(c *gin.Context) {
+	var envelope struct {
+		Event          string                 `json:"event"`
+		Timestamp      string                 `json:"timestamp"`
+		InstallationID int64                  `json:"installation_id"`
+		Data           map[string]interface{} `json:"data"`
+	}
 
-// Example endpoint with authentication
-func yourEndpointHandler(c *gin.Context) {
-	var requestBody map[string]interface{}
-
-	if err := c.BindJSON(&requestBody); err != nil {
+	if err := c.BindJSON(&envelope); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":   true,
 			"message": "Invalid JSON request body",
@@ -90,15 +92,26 @@ func yourEndpointHandler(c *gin.Context) {
 		return
 	}
 
-	// TODO: Implement your business logic here
-	// Example: Process the request data
-	// data := requestBody["data"]
+	// InstallationID is your tenant key - look up that installation's pik_ key
+	// and act in its context.
+	log.Printf("[%d] %s", envelope.InstallationID, envelope.Event)
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "Request processed successfully",
-		"data":    requestBody,
-	})
+	// TODO: enqueue the work rather than doing it here. SSP allows 10 seconds
+	// and retries 3 times (60s / 300s / 900s) on any non-2xx, so slow
+	// processing on the request path turns into duplicate deliveries.
+	// Make handling idempotent: duplicates are normal, not exceptional.
+
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+// Your own endpoints. SSP never calls these - design them as you like.
+// Everything beyond /health and the webhook route is YOUR plugin calling SSP,
+// authenticated with the installation's pik_ key against
+// https://api.ssppos.com/api/plugin/v1 - see
+// https://docs.ssppos.com/docs/sdk/plugin-data-api
+func yourEndpointHandler(c *gin.Context) {
+	// TODO: Implement your business logic here
+	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
 // Error handler middleware
@@ -140,16 +153,18 @@ func main() {
 	// Apply error handler
 	router.Use(errorHandler())
 
-	// Public routes
+	// Health check - polled by SSP
 	router.GET("/health", healthHandler)
-	router.GET("/capabilities", capabilitiesHandler)
 
-	// Protected routes
-	protected := router.Group("/")
-	protected.Use(authMiddleware())
+	// Webhook receiver - signature-verified
+	webhooks := router.Group("/webhooks")
+	webhooks.Use(authMiddleware())
 	{
-		protected.POST("/your-endpoint", yourEndpointHandler)
+		webhooks.POST("/ssp", webhookHandler)
 	}
+
+	// Your own routes
+	router.POST("/your-endpoint", yourEndpointHandler)
 
 	// Get port from environment or use default
 	port := os.Getenv("PORT")
@@ -159,8 +174,8 @@ func main() {
 
 	// Start server
 	log.Printf("SSP Plugin Server starting on port %s", port)
-	log.Printf("Health: http://localhost:%s/health", port)
-	log.Printf("Capabilities: http://localhost:%s/capabilities", port)
+	log.Printf("  Health:  GET  http://localhost:%s/health", port)
+	log.Printf("  Webhook: POST http://localhost:%s/webhooks/ssp", port)
 
 	if err := router.Run(":" + port); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
